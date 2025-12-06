@@ -41,21 +41,21 @@ scrape_asthma_year <- function(year) {
   # ---- Check URL exists ----
   resp <- httr::HEAD(url)
   if (resp$status_code != 200) {
-    warning("❌ URL not available for ", year, " (status ", resp$status_code, ")")
+    warning("URL not available for ", year, " (status ", resp$status_code, ")")
     return(NULL)
   }
   
   # ---- Load HTML safely ----
   page <- tryCatch(read_html(url), error = function(e) NULL)
   if (is.null(page)) {
-    warning("❌ HTML loading failed for ", year)
+    warning("HTML loading failed for ", year)
     return(NULL)
   }
   
   # ---- Extract first HTML table ----
   tables <- page %>% html_table(fill = TRUE)
   if (length(tables) == 0) {
-    warning("❌ No table found for ", year)
+    warning("No table found for ", year)
     return(NULL)
   }
   
@@ -65,7 +65,7 @@ scrape_asthma_year <- function(year) {
   # ---- Identify state column ----
   state_col <- grep("state|territory", names(df), ignore.case = TRUE, value = TRUE)[1]
   if (is.null(state_col)) {
-    warning("❌ No state column found for ", year)
+    warning("No state column found for ", year)
     return(NULL)
   }
   df <- df %>% rename(state = all_of(state_col))
