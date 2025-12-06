@@ -1,0 +1,352 @@
+---
+title: "STAT_535_Project"
+author: "Sayak Chatterjee"
+date: "2025-12-06"
+output: html_document
+---
+
+# Data scraping for the Asthama rates for different years across the different states in the US
+
+```{r}
+library(httr)
+library(rvest)
+library(dplyr)
+library(janitor)
+library(purrr)
+library(stringr)
+
+# -----------------------------------------------------------
+# OFFICIAL URL LIST (verified manually)
+# -----------------------------------------------------------
+
+asthma_urls <- list(
+  "2014" = "https://www.cdc.gov/asthma/archivedata/2014/2014_data_states.html",
+  "2015" = "https://www.cdc.gov/asthma/archivedata/2015/2015_data_states.html",
+  "2016" = "https://www.cdc.gov/asthma/archivedata/2016/2016-archived-data-states.html",
+  "2017" = "https://www.cdc.gov/asthma/archivedata/2017/2017_archived_states_territory.html",
+  "2018" = "https://www.cdc.gov/asthma/archivedata/2018/2018_archived_states_territory.html",
+  "2019" = "https://www.cdc.gov/asthma/archivedata/2019/2019_archived_states_territory.html",
+  "2020" = "https://www.cdc.gov/asthma/archivedata/2020/2020_archived_states_territory.html"
+)
+
+# -----------------------------------------------------------
+# FULL SCRAPER FUNCTION (extracts PCT + SE)
+# -----------------------------------------------------------
+
+scrape_asthma_year <- function(year) {
+  
+  url <- asthma_urls[[as.character(year)]]
+  message("\nScraping ", year, " → ", url)
+  
+  # ---- Check URL exists ----
+  resp <- httr::HEAD(url)
+  if (resp$status_code != 200) {
+    warning("❌ URL not available for ", year, " (status ", resp$status_code, ")")
+    return(NULL)
+  }
+  
+  # ---- Load HTML safely ----
+  page <- tryCatch(read_html(url), error = function(e) NULL)
+  if (is.null(page)) {
+    warning("❌ HTML loading failed for ", year)
+    return(NULL)
+  }
+  
+  # ---- Extract first HTML table ----
+  tables <- page %>% html_table(fill = TRUE)
+  if (length(tables) == 0) {
+    warning("❌ No table found for ", year)
+    return(NULL)
+  }
+  
+  df <- tables[[1]] %>% clean_names()
+  names(df) <- make.names(names(df), unique = TRUE)
+  
+  # ---- Identify state column ----
+  state_col <- grep("state|territory", names(df), ignore.case = TRUE, value = TRUE)[1]
+  if (is.null(state_col)) {
+    warning("❌ No state column found for ", year)
+    return(NULL)
+  }
+  df <- df %>% rename(state = all_of(state_col))
+  
+  # ---- Identify asthma percent column ----
+  pct_col <- grep("percent.*current.*asthma", 
+                  names(df), ignore.case = TRUE, value = TRUE)[1]
+  
+  if (is.null(pct_col)) {
+    warning("⚠ No asthma percent column found for ", year)
+    df$asthma_pct <- NA
+    df$asthma_se <- NA
+  } else {
+    
+    raw_vals <- df[[pct_col]]
+    
+    # Extract numeric percent BEFORE parentheses
+    df$asthma_pct <- raw_vals %>%
+      str_extract("^[0-9]+\\.?[0-9]*") %>% 
+      as.numeric()
+    
+    # Extract standard error BETWEEN parentheses: (SE)
+    df$asthma_se <- raw_vals %>%
+      str_extract("(?<=\\().+?(?=\\))") %>% 
+      as.numeric()
+  }
+  
+  df$year <- year
+  
+  return(df)
+}
+
+# -----------------------------------------------------------
+# SCRAPE ALL YEARS INTO ONE DATASET
+# -----------------------------------------------------------
+
+years <- 2014:2020
+
+asthma_all_years <- map_df(years, scrape_asthma_year)
+
+# View structure
+glimpse(asthma_all_years)
+
+
+years <- 2014:2020
+
+asthma_all_years <- map_df(years, scrape_asthma_year)
+
+glimpse(asthma_all_years)
+
+library(ggplot2)
+library(dplyr)
+
+plot_asthma_year <- function(year) {
+  
+  df_year <- asthma_all_years %>%
+    filter(year == !!year) %>%
+    filter(!state %in% c("United States", "Total", "Totals"))
+  
+  ggplot(df_year, aes(x = reorder(state, asthma_pct), y = asthma_pct)) +
+    geom_col(fill = "steelblue") +
+    coord_flip() +
+    labs(
+      title = paste("Adult Asthma Prevalence by State —", year),
+      x = "State",
+      y = "Percent with Current Asthma (%)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.y = element_text(size = 9),
+      plot.title = element_text(size = 18, face = "bold")
+    )
+}
+
+# Example:
+plot_asthma_year(2014)
+plot_asthma_year(2015)
+plot_asthma_year(2016)
+plot_asthma_year(2017)
+plot_asthma_year(2018)
+plot_asthma_year(2019)
+plot_asthma_year(2020)
+
+```
+
+
+
+
+```{r}
+library(readr)
+library(dplyr)
+library(janitor)
+library(lubridate)
+library(stringr)
+
+# Load CSV file
+aqi <- read_csv("pollution_2000_2023.csv") %>% 
+  clean_names()
+
+# Convert date column
+aqi <- aqi %>%
+  mutate(date = suppressWarnings(as.Date(date, format = "%d/%m/%y")),
+         year = year(date))
+
+# Identify AQI columns that exist
+aqi_columns <- c("o3_aqi", "co_aqi", "so2_aqi", "no2_aqi")
+aqi_columns <- aqi_columns[aqi_columns %in% names(aqi)]
+
+# Compute average AQI by state and year
+aqi_state_year <- aqi %>%
+  group_by(state, year) %>%
+  summarise(
+    across(
+      all_of(aqi_columns), 
+      ~ mean(.x, na.rm = TRUE)
+    )
+  ) %>%
+  ungroup()
+
+
+aqi_state_year
+
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+plot_all_pollutants_option1 <- function() {
+  
+  df <- aqi_state_year %>%
+    filter(year >= 2014, year <= 2022) %>%
+    pivot_longer(
+      cols = c(o3_aqi, co_aqi, so2_aqi, no2_aqi),
+      names_to = "pollutant",
+      values_to = "aqi"
+    ) %>%
+    mutate(
+      pollutant = case_when(
+        pollutant == "o3_aqi"  ~ "O₃ AQI",
+        pollutant == "co_aqi"  ~ "CO AQI",
+        pollutant == "so2_aqi" ~ "SO₂ AQI",
+        pollutant == "no2_aqi" ~ "NO₂ AQI"
+      )
+    )
+  
+  ggplot(df, aes(x = year, y = aqi, color = state, group = state)) +
+    geom_line(linewidth = 0.9, alpha = 0.8) +
+    geom_point(size = 1) +
+    facet_wrap(~ pollutant, scales = "free_y", ncol = 2) +
+    labs(
+      title = "AQI Trends for All Pollutants Across All States (2014–2022)",
+      x = "Year",
+      y = "Average AQI",
+      color = "State"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "right",
+      legend.key.size = unit(0.4, "cm"),
+      legend.text = element_text(size = 7),
+      strip.text = element_text(size = 14, face = "bold")
+    )
+}
+
+# Run the plot:
+plot_all_pollutants_option1()
+
+```
+
+
+```{r}
+library(dplyr)
+
+merged_data <- asthma_all_years %>%
+  filter(year >= 2014, year <= 2020) %>%
+  select(state, year, asthma_pct) %>%
+  inner_join(aqi_state_year, by = c("state", "year"))
+
+head(merged_data)
+
+library(GGally)
+
+merged_data %>%
+  select(asthma_pct, o3_aqi, co_aqi, so2_aqi, no2_aqi) %>%
+  ggpairs()
+
+
+ggplot(merged_data, aes(x = o3_aqi, y = asthma_pct)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "O3 AQI vs Asthma Rate")
+
+
+model1 <- lm(asthma_pct ~ o3_aqi + co_aqi + so2_aqi + no2_aqi, data = merged_data)
+summary(model1)
+
+library(lfe)
+
+model2 <- felm(asthma_pct ~ o3_aqi + co_aqi + so2_aqi + no2_aqi | state, data = merged_data)
+summary(model2)
+
+model3 <- felm(asthma_pct ~ o3_aqi + co_aqi + so2_aqi + no2_aqi | state + year, data = merged_data)
+summary(model3)
+
+library(broom)
+library(ggplot2)
+
+coef_df <- tidy(model3)
+
+ggplot(coef_df, aes(x = estimate, y = term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = estimate - std.error*2,
+                     xmax = estimate + std.error*2)) +
+  labs(title = "Effect of Pollutants on Asthma (2014–2020)")
+
+
+```
+
+
+```{r}
+library(readr)
+library(dplyr)
+library(janitor)
+library(lubridate)
+library(stringr)
+
+# Load CSV file
+poll <- read_csv("pollution_2000_2023.csv") %>% 
+  clean_names()   # converts "O3 Mean" → "o3_mean"
+
+# Convert date column (your format is like "01/01/00")
+poll <- poll %>%
+  mutate(
+    date = suppressWarnings(as.Date(date, format = "%m/%d/%y")),
+    year = year(date)
+  )
+
+# Identify pollutant MEAN columns (NOT AQI)
+pollutant_mean_cols <- c(
+  "o3_mean",
+  "co_mean",
+  "so2_mean",
+  "no2_mean",
+  "pm25_mean",
+  "pm10_mean"
+)
+
+# Only keep columns that actually exist in the file
+pollutant_mean_cols <- pollutant_mean_cols[pollutant_mean_cols %in% names(poll)]
+
+# Compute state-year mean pollutant concentrations
+pollution_state_year <- poll %>%
+  group_by(state, year) %>%
+  summarise(
+    across(
+      all_of(pollutant_mean_cols),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
+
+pollution_state_year
+
+
+merged_data <- asthma_all_years %>%
+  inner_join(pollution_state_year, by = c("state", "year"))
+
+library(GGally)
+
+# Identify pollutant mean columns that exist in the merged data
+pollutant_means <- c("o3_mean", "co_mean", "so2_mean", "no2_mean", "pm25_mean", "pm10_mean")
+pollutant_means <- pollutant_means[pollutant_means %in% names(merged_data)]
+
+# Build correlation dataset
+corr_data <- merged_data %>%
+  select(asthma_pct, all_of(pollutant_means))
+
+# Plot correlation matrix
+ggpairs(corr_data)
+
+```
+
