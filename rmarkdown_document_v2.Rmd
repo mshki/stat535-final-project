@@ -1,0 +1,608 @@
+---
+title: "STAT_535_Project"
+author: "Sayak Chatterjee"
+date: "2025-12-06"
+output: html_document
+---
+
+# Data scraping for the Asthama rates for different years across the different states in the US
+
+```{r}
+urls <- c(
+  "2000" = "https://www.cdc.gov/asthma/brfss/00/current/tableC1.htm",
+  "2001" = "https://www.cdc.gov/asthma/brfss/01/current/tableC1.htm",
+  "2002" = "https://www.cdc.gov/asthma/brfss/02/current/tableC1.htm",
+  "2003" = "https://www.cdc.gov/asthma/brfss/03/current/tableC1.htm",
+  "2004" = "https://www.cdc.gov/asthma/brfss/04/current/tableC1.htm",
+  "2005" = "https://www.cdc.gov/asthma/brfss/05/current/tableC1.htm",
+  "2006" = "https://www.cdc.gov/asthma/brfss/06/current/tableC1.htm",
+  "2007" = "https://www.cdc.gov/asthma/brfss/07/current/tableC1.htm",
+  "2008" = "https://www.cdc.gov/asthma/brfss/08/current/tableC1.htm",
+  "2009" = "https://www.cdc.gov/asthma/brfss/09/current/tableC1.htm",
+  "2010" = "https://www.cdc.gov/asthma/brfss/2010/current/tableC1.htm",
+  "2011" = "https://www.cdc.gov/asthma/brfss/2011/tableC1.htm",
+  "2012" = "https://www.cdc.gov/asthma/brfss/2012/tableC1.htm",
+  "2013" = "https://www.cdc.gov/asthma/brfss/2013/tableC1.htm",
+  "2014" = "https://www.cdc.gov/asthma/brfss/2014/tableC1.htm",
+  "2015" = "https://www.cdc.gov/asthma/brfss/2015/tableC1.htm",
+  "2016" = "https://www.cdc.gov/asthma/brfss/2016/tableC1.htm",
+  "2017" = "https://www.cdc.gov/asthma/brfss/2017/tableC1.htm",
+  "2018" = "https://www.cdc.gov/asthma/brfss/2018/tableC1.html",
+  "2019" = "https://www.cdc.gov/asthma/brfss/2019/tableC1.html",
+  "2020" = "https://www.cdc.gov/asthma/brfss/2020/tableC1.html"
+)
+
+```
+
+
+```{r}
+library(rvest)
+library(dplyr)
+library(stringr)
+library(purrr)
+
+scrape_c1 <- function(url, year) {
+  message("Scraping ", year, " from ", url)
+  
+  page <- try(read_html(url), silent = TRUE)
+  if (inherits(page, "try-error")) {
+    warning("Failed to load ", url)
+    return(NULL)
+  }
+  
+  # Extract all HTML tables
+  tables <- page %>% html_table(fill = TRUE)
+  if (length(tables) == 0) {
+    warning("No tables found for ", year)
+    return(NULL)
+  }
+  
+  # Pick the table that contains "State" in headers
+  idx <- which.max(
+    sapply(tables, function(x) any(grepl("State", names(x), ignore.case = TRUE)))
+  )
+  
+  df <- tables[[idx]]
+  names(df) <- tolower(names(df))
+  
+  # Identify relevant columns
+  state_col <- grep("state", names(df), value = TRUE)[1]
+  prev_col  <- grep("prev|percent", names(df), value = TRUE)[1]
+  se_col    <- grep("se|error", names(df), value = TRUE)[1]
+  
+  if (is.na(state_col) || is.na(prev_col) || is.na(se_col)) {
+    warning("Missing columns in ", year)
+    return(NULL)
+  }
+  
+  # Clean the table
+  df_clean <- df %>%
+    select(state = !!state_col, prevalence = !!prev_col, se = !!se_col) %>%
+    mutate(
+      year = as.numeric(year),
+      state = trimws(state),
+      prevalence = as.numeric(gsub("[^0-9.]", "", prevalence)),
+      se = as.numeric(gsub("[^0-9.]", "", se))
+    ) %>%
+    filter(!is.na(prevalence), !grepl("total", state, ignore.case = TRUE))
+  
+  return(df_clean)
+}
+
+all_data <- map2_df(urls, names(urls), scrape_c1)
+
+unique(all_data$year)
+
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+plot_asthma_year <- function(data, year_to_plot) {
+  
+  df_year <- data %>%
+    filter(year == year_to_plot,
+           !grepl("total", state, ignore.case = TRUE)) %>%
+    mutate(state = trimws(state)) %>%
+    arrange(prevalence)
+  
+  ggplot(df_year, aes(x = reorder(state, prevalence), y = prevalence)) +
+    geom_col(fill = "steelblue", alpha = 0.85) +
+    geom_errorbar(aes(ymin = prevalence - se,
+                      ymax = prevalence + se),
+                  width = 0.3, color = "black") +
+    labs(
+      title = paste("Asthma Prevalence by State in", year_to_plot),
+      x = "State",
+      y = "Asthma Prevalence (%)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+}
+
+```
+
+```{r}
+plot_asthma_year(all_data, 2000)
+plot_asthma_year(all_data, 2001)
+plot_asthma_year(all_data, 2002)
+plot_asthma_year(all_data, 2003)
+plot_asthma_year(all_data, 2004)
+plot_asthma_year(all_data, 2005)
+plot_asthma_year(all_data, 2006)
+plot_asthma_year(all_data, 2007)
+plot_asthma_year(all_data, 2008)
+plot_asthma_year(all_data, 2009)
+plot_asthma_year(all_data, 2010)
+plot_asthma_year(all_data, 2011)
+plot_asthma_year(all_data, 2012)
+plot_asthma_year(all_data, 2013)
+plot_asthma_year(all_data, 2014)
+plot_asthma_year(all_data, 2015)
+plot_asthma_year(all_data, 2016)
+plot_asthma_year(all_data, 2017)
+plot_asthma_year(all_data, 2018)
+plot_asthma_year(all_data, 2019)
+plot_asthma_year(all_data, 2020)
+
+```
+
+
+
+# Data scraping for the Air pollutants (average) 2000-2024 (AQI)
+
+```{r}
+library(readr)
+library(dplyr)
+library(janitor)
+library(lubridate)
+library(stringr)
+
+# Load CSV file
+aqi <- read_csv("pollution_2000_2023.csv") %>% 
+  clean_names()
+
+# Convert date column
+aqi <- aqi %>%
+  mutate(date = suppressWarnings(as.Date(date, format = "%d/%m/%y")),
+         year = year(date))
+
+# Identify AQI columns that exist
+aqi_columns <- c("o3_aqi", "co_aqi", "so2_aqi", "no2_aqi")
+aqi_columns <- aqi_columns[aqi_columns %in% names(aqi)]
+
+# Compute average AQI by state and year
+aqi_state_year <- aqi %>%
+  group_by(state, year) %>%
+  summarise(
+    across(
+      all_of(aqi_columns), 
+      ~ mean(.x, na.rm = TRUE)
+    )
+  ) %>%
+  ungroup()
+
+aqi_state_year
+```
+
+# Data scraping for the Air pollutants (average) 2000-2024 (Mean)
+
+```{r}
+library(readr)
+library(dplyr)
+library(janitor)
+library(lubridate)
+library(stringr)
+
+# Load CSV file
+poll <- read_csv("pollution_2000_2023.csv") %>% 
+  clean_names()   # converts "O3 Mean" → "o3_mean"
+
+# Convert date column (your format is like "01/01/00")
+poll <- poll %>%
+  mutate(
+    date = suppressWarnings(as.Date(date, format = "%m/%d/%y")),
+    year = year(date)
+  )
+
+# Identify pollutant MEAN columns (NOT AQI)
+pollutant_mean_cols <- c(
+  "o3_mean",
+  "co_mean",
+  "so2_mean",
+  "no2_mean",
+  "pm25_mean",
+  "pm10_mean"
+)
+
+# Only keep columns that actually exist in the file
+pollutant_mean_cols <- pollutant_mean_cols[pollutant_mean_cols %in% names(poll)]
+
+# Compute state-year mean pollutant concentrations
+pollution_state_year <- poll %>%
+  group_by(state, year) %>%
+  summarise(
+    across(
+      all_of(pollutant_mean_cols),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
+
+pollution_state_year
+```
+
+
+# Plotting for the pollutant means
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+plot_pollutant_by_state <- function(data, year_to_plot, pollutant_col) {
+  
+  df_year <- data %>%
+    filter(year == year_to_plot) %>%
+    select(state, year, all_of(pollutant_col)) %>%
+    arrange(.data[[pollutant_col]])
+  
+  ggplot(df_year, aes(x = reorder(state, .data[[pollutant_col]]), 
+                      y = .data[[pollutant_col]])) +
+    geom_col(fill = "steelblue", alpha = 0.85) +
+    labs(
+      title = paste("State-wise", pollutant_col, "in", year_to_plot),
+      x = "State",
+      y = paste("Mean", pollutant_col)
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+}
+
+plot_pollutant_by_state(pollution_state_year, 2000, "o3_mean")
+plot_pollutant_by_state(pollution_state_year, 2000, "no2_mean")
+plot_pollutant_by_state(pollution_state_year, 2000, "co_mean")
+plot_pollutant_by_state(pollution_state_year, 2000, "so2_mean")
+
+```
+
+# Plotting for the pollutant AQIs
+
+```{r}
+plot_aqi_by_state <- function(data, year_to_plot, aqi_col) {
+  
+  df_year <- data %>%
+    filter(year == year_to_plot) %>%
+    select(state, year, all_of(aqi_col)) %>%
+    arrange(.data[[aqi_col]])
+  
+  ggplot(df_year, aes(x = reorder(state, .data[[aqi_col]]), 
+                      y = .data[[aqi_col]])) +
+    geom_col(fill = "tomato", alpha = 0.85) +
+    labs(
+      title = paste("State-wise", aqi_col, "AQI in", year_to_plot),
+      x = "State",
+      y = paste("AQI:", aqi_col)
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+}
+
+plot_aqi_by_state(aqi_state_year, 2000, "o3_aqi")
+plot_aqi_by_state(aqi_state_year, 2000, "co_aqi")
+plot_aqi_by_state(aqi_state_year, 2000, "so2_aqi")
+plot_aqi_by_state(aqi_state_year, 2000, "no2_aqi")
+
+```
+
+# Correlation between AQI and the mean value of a particular pollutant
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+plot_correlation_aqi_pollutant <- function(aqi_data, pollutant_data, 
+                                           year_to_plot, 
+                                           aqi_col, pollutant_col) {
+  
+  # Merge AQI + pollutant dataset by state + year
+  df <- aqi_data %>%
+    inner_join(pollutant_data, by = c("state", "year")) %>%
+    filter(year == year_to_plot) %>%
+    select(state, year, all_of(aqi_col), all_of(pollutant_col))
+  
+  # Compute correlation
+  corr_value <- round(cor(df[[aqi_col]], df[[pollutant_col]], use = "complete.obs"), 3)
+  
+  # Plot
+  ggplot(df, aes(x = .data[[pollutant_col]], y = .data[[aqi_col]])) +
+    geom_point(color = "steelblue", size = 3) +
+    geom_smooth(method = "lm", se = TRUE, color = "red") +
+    labs(
+      title = paste("Correlation Between", pollutant_col, "and", aqi_col, "in", year_to_plot),
+      subtitle = paste("Pearson r =", corr_value),
+      x = paste("Mean", pollutant_col),
+      y = paste("AQI:", aqi_col)
+    ) +
+    theme_minimal(base_size = 14)
+}
+
+plot_correlation_aqi_pollutant(aqi_state_year, pollution_state_year,
+                               2018, "no2_aqi", "no2_mean")
+
+plot_correlation_aqi_pollutant(aqi_state_year, pollution_state_year,
+                               2010, "so2_aqi", "so2_mean")
+plot_correlation_aqi_pollutant(aqi_state_year, pollution_state_year,
+                               2000, "so2_aqi", "so2_mean")
+plot_correlation_aqi_pollutant(aqi_state_year, pollution_state_year,
+                               2005, "co_aqi", "co_mean")
+```
+
+
+
+
+# Creating the final dataset
+
+```{r}
+state_map <- data.frame(
+  state_abb = state.abb,
+  state_name = state.name,
+  stringsAsFactors = FALSE
+)
+
+# Add DC manually (not included in state.name/state.abb defaults)
+state_map <- rbind(
+  state_map,
+  data.frame(state_abb = "DC", state_name = "District Of Columbia", stringsAsFactors = FALSE)
+)
+
+asthma_state_year_fixed <- all_data %>%
+  mutate(state = trimws(state)) %>%
+  left_join(state_map, by = c("state" = "state_abb")) %>%
+  mutate(state = state_name) %>%
+  select(-state_name)
+
+unique(asthma_state_year_fixed$state)[1:10]
+
+length(intersect(unique(asthma_state_year_fixed$state),
+                 unique(aqi_state_year$state)))
+
+full_data <- asthma_state_year_fixed %>%
+  inner_join(aqi_state_year, by = c("state", "year")) %>%
+  inner_join(pollution_state_year, by = c("state", "year"))
+
+glimpse(full_data)
+nrow(full_data)
+
+```
+
+```{r}
+glimpse(full_data)
+nrow(full_data)
+unique(full_data$state)[1:20]
+range(full_data$year)
+
+```
+
+
+
+# Linear Regression
+#multi-pollutant model
+```{r}
+library(car)
+
+model_pollution <- lm(
+  prevalence ~  o3_mean + no2_mean + so2_mean + co_mean,
+  data = full_data
+)
+
+summary(model_pollution)
+
+#checking for multi-collinearity among the pollutants
+vif(model_pollution)
+
+```
+
+# Fitting single-pollutant models
+```{r}
+summary(lm(prevalence ~ o3_mean, data = full_data))
+summary(lm(prevalence ~ co_mean, data = full_data))
+summary(lm(prevalence ~ so2_mean, data = full_data))
+summary(lm(prevalence ~ no2_mean, data = full_data))
+
+```
+
+
+# pollution trends vs asthma trends
+
+Compute Pollution and Asthma Trends for Each State
+
+We will do this using per-state linear trends:
+
+For each state, fit:
+
+Pollutant (t) = $\alpha$ + $\beta$t
+Asthma (t) = $\gamma$ + $\delta$t
+
+Then compare the slopes $\beta$ and $\delta$ across states.
+
+Which asks:
+In states where pollution declined faster, did asthma prevalence also decline faster?
+
+```{r}
+library(dplyr)
+library(purrr)
+library(broom)
+
+o3_slopes <- full_data %>%
+  group_by(state) %>%
+  do(tidy(lm(o3_mean ~ year, data = .))) %>%
+  filter(term == "year") %>%
+  select(state, o3_slope = estimate)
+
+no2_slopes <- full_data %>%
+  group_by(state) %>%
+  do(tidy(lm(no2_mean ~ year, data = .))) %>%
+  filter(term == "year") %>%
+  select(state, no2_slope = estimate)
+
+so2_slopes <- full_data %>%
+  group_by(state) %>%
+  do(tidy(lm(so2_mean ~ year, data = .))) %>%
+  filter(term == "year") %>%
+  select(state, so2_slope = estimate)
+
+co_slopes <- full_data %>%
+  group_by(state) %>%
+  do(tidy(lm(co_mean ~ year, data = .))) %>%
+  filter(term == "year") %>%
+  select(state, co_slope = estimate)
+
+```
+
+```{r}
+asthma_slopes <- full_data %>%
+  group_by(state) %>%
+  do(tidy(lm(prevalence ~ year, data = .))) %>%
+  filter(term == "year") %>%
+  select(state, asthma_slope = estimate)
+
+```
+
+```{r}
+trend_data <- asthma_slopes %>%
+  left_join(o3_slopes, by = "state") %>%
+  left_join(no2_slopes, by = "state") %>%
+  left_join(so2_slopes, by = "state") %>%
+  left_join(co_slopes, by = "state")
+
+trend_data
+```
+
+#Do states with faster pollution declines experience faster asthma declines?
+
+```{r}
+summary(lm(asthma_slope ~ o3_slope, data = trend_data))
+summary(lm(asthma_slope ~ no2_slope, data = trend_data))
+summary(lm(asthma_slope ~ so2_slope, data = trend_data))
+summary(lm(asthma_slope ~ co_slope, data = trend_data))
+
+
+ggplot(trend_data, aes(x = o3_slope, y = asthma_slope)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    title = "Do O3 Trends Predict Asthma Trends Over 2000–2020?",
+    x = "Annual O3 Trend (slope)",
+    y = "Annual Asthma Trend (slope)"
+  ) +
+  theme_minimal(base_size = 14)
+
+ggplot(trend_data, aes(x = no2_slope, y = asthma_slope)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    title = "Do NO2 Trends Predict Asthma Trends Over 2000–2020?",
+    x = "Annual NO2 Trend (slope)",
+    y = "Annual Asthma Trend (slope)"
+  ) +
+  theme_minimal(base_size = 14)
+
+ggplot(trend_data, aes(x = so2_slope, y = asthma_slope)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    title = "Do SO2 Trends Predict Asthma Trends Over 2000–2020?",
+    x = "Annual SO2 Trend (slope)",
+    y = "Annual Asthma Trend (slope)"
+  ) +
+  theme_minimal(base_size = 14)
+
+ggplot(trend_data, aes(x = co_slope, y = asthma_slope)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(
+    title = "Do CO Trends Predict Asthma Trends Over 2000–2020?",
+    x = "Annual CO Trend (slope)",
+    y = "Annual Asthma Trend (slope)"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+
+# Selecting 10 most polluted states
+
+```{r}
+library(dplyr)
+
+# List of pollutant mean columns (modify as needed)
+pollutants <- c("o3_mean", "no2_mean", "so2_mean", "co_mean")
+
+# Compute average pollution across 2000–2020 for each state
+state_pollution <- full_data %>%
+  group_by(state) %>%
+  summarise(across(all_of(pollutants), mean, na.rm = TRUE)) %>%
+  ungroup()
+
+# Create a combined pollution index (average of standardized pollutants)
+state_pollution <- state_pollution %>%
+  mutate(pollution_index = rowMeans(scale(across(all_of(pollutants)))))
+
+```
+
+```{r}
+top_states <- state_pollution %>%
+  arrange(desc(pollution_index)) %>%
+  slice(1:10) %>%
+  pull(state)
+
+top_states
+
+highpoll_data <- full_data %>%
+  filter(state %in% top_states)
+
+```
+
+```{r}
+library(plm)
+
+model_highpoll <- plm(
+  prevalence ~ o3_mean + no2_mean + so2_mean + co_mean,
+  data = highpoll_data,
+  index = c("state","year"),
+  model = "within"
+)
+
+summary(model_highpoll)
+
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# convert dataset to long format for easy plotting
+plot_data <- highpoll_data %>%
+  select(state, year, prevalence, o3_mean, no2_mean, so2_mean, co_mean) %>%
+  pivot_longer(cols = c(prevalence, o3_mean, no2_mean, so2_mean, co_mean),
+               names_to = "variable", values_to = "value")
+
+# facet plot for trends
+ggplot(plot_data, aes(x = year, y = value, color = variable)) +
+  geom_line(size = 1.1) +
+  facet_wrap(~ state, scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Asthma & Pollution Trends in High-Pollution States",
+    x = "Year",
+    y = "Value",
+    color = "Variable"
+  ) +
+  scale_color_brewer(palette = "Dark2")
+
+```
+
+
