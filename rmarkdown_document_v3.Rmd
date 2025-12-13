@@ -97,7 +97,6 @@ unique(all_data$year)
 
 
 ```{r}
-library(dplyr)
 library(ggplot2)
 
 plot_asthma_year <- function(data, year_to_plot) {
@@ -155,17 +154,15 @@ plot_asthma_year(all_data, 2020)
 
 ```{r}
 library(readr)
-library(dplyr)
 library(janitor)
 library(lubridate)
-library(stringr)
 
 # Load CSV file
-aqi <- read_csv("pollution_2000_2023.csv") %>% 
+pol_data <- read_csv("data/pollution_2000_2023.csv") %>% 
   clean_names()
 
 # Convert date column
-aqi <- aqi %>%
+aqi <- pol_data %>%
   mutate(date = suppressWarnings(as.Date(date, format = "%d/%m/%y")),
          year = year(date))
 
@@ -190,18 +187,8 @@ aqi_state_year
 # Data scraping for the Air pollutants (average) 2000-2024 (Mean)
 
 ```{r}
-library(readr)
-library(dplyr)
-library(janitor)
-library(lubridate)
-library(stringr)
-
-# Load CSV file
-poll <- read_csv("pollution_2000_2023.csv") %>% 
-  clean_names()   # converts "O3 Mean" → "o3_mean"
-
 # Convert date column (your format is like "01/01/00")
-poll <- poll %>%
+poll <- pol_data %>%
   mutate(
     date = suppressWarnings(as.Date(date, format = "%m/%d/%y")),
     year = year(date)
@@ -238,9 +225,6 @@ pollution_state_year
 # Plotting for the pollutant means
 
 ```{r}
-library(ggplot2)
-library(dplyr)
-
 plot_pollutant_by_state <- function(data, year_to_plot, pollutant_col) {
   
   df_year <- data %>%
@@ -299,9 +283,6 @@ plot_aqi_by_state(aqi_state_year, 2000, "no2_aqi")
 # Correlation between AQI and the mean value of a particular pollutant
 
 ```{r}
-library(ggplot2)
-library(dplyr)
-
 plot_correlation_aqi_pollutant <- function(aqi_data, pollutant_data, 
                                            year_to_plot, 
                                            aqi_col, pollutant_col) {
@@ -881,3 +862,172 @@ Socioeconomic disparities are strong and consistent-low-income groups experience
 Pollutant-AQI correlations are extremely high, confirming dataset validity.
 
 Regression and fixed-effects models identify statistically significant pollutant effects but explain only a modest portion of variation, especially compared to income.
+
+# Model Fitting and Optimization
+
+Let's take a look at the income bracket compared to asthma rate: 
+```{r}
+mean_pol <- pol_data %>%
+  mutate(
+    year = lubridate::year(date)
+  ) %>%
+  group_by(state, year) %>%
+  summarise(
+    annual_o3_mean = mean(o3_mean, na.rm = TRUE),
+    annual_co_mean = mean(co_mean, na.rm=TRUE),
+    annual_so2_mean = mean(so2_mean, na.rm=TRUE),
+    annual_no2_mean = mean(no2_mean, na.rm=TRUE),
+    .groups = 'drop'
+  )
+
+convert_state_code <- function(df, col = "State") {
+  state_lookup <- setNames(state.name, toupper(state.abb))
+  state_codes <- df[[col]]
+  input_codes_upper <- toupper(as.character(state_codes))
+  converted_names <- state_lookup[input_codes_upper]
+  df[[col]] <- unname(converted_names)
+  return(df)
+}
+asthma_data_clean <- convert_state_code(all_data, "state")
+
+combined_data <- mean_pol %>%
+  inner_join(asthma_data_clean, by = c("state", "year"))
+
+head(combined_data)
+
+combined_data %>% filter(state == "New York") %>%
+  ggplot(aes(x = annual_o3_mean, y = prevalence)) + geom_point(
+    aes(color = state), 
+    alpha = 0.6 
+  )
+
+combined_data %>% filter(state == "New York") %>%
+  ggplot(aes(x = annual_co_mean, y = prevalence)) + geom_point(
+    aes(color = state), 
+    alpha = 0.6 
+  )
+
+combined_data %>% filter(state == "New York") %>%
+  ggplot(aes(x = annual_so2_mean, y = prevalence)) + geom_point(
+    aes(color = state), 
+    alpha = 0.6 
+  )
+
+combined_data %>% filter(state == "New York") %>%
+  ggplot(aes(x = annual_no2_mean, y = prevalence)) + geom_point(
+    aes(color = state), 
+    alpha = 0.6 
+  )
+
+```
+
+There seems to be a positive linear trend between annual o3 mean and asthma prevalnece in New York! Now, we can compare linear regression model fit for the most polluted states found earlier: 
+```
+ [1] "District Of Columbia" "Michigan"            
+ [3] "New York"             "Arizona"             
+ [5] "New Jersey"           "Indiana"             
+ [7] "Colorado"             "Missouri"            
+ [9] "Wisconsin"            "Illinois"  
+```
+ 
+```{r}
+library(rsample)
+# Test train split
+
+keep = c("New York", "New Jersey", "Colorado", "Wisconsin", "Michigan", "Arizona", "Indiana", "Missouri", "Illinois")
+subs <- combined_data[combined_data$state %in% keep, ]
+
+data_split <- initial_split(
+  subs, 
+  prop = 0.75
+)
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+# Train linear regression model
+lm0 <- lm(prevalence ~ annual_o3_mean, data=train_data)
+
+rmse <- function(actual, pred) {
+  diff <- actual - pred
+  return( sqrt(mean(diff^2)))
+}
+
+# Now test on data, calc RMSE to evaluate goodness of fit
+rmse(test_data$prevalence, predict(lm0, test_data))
+# lwk a really low value!
+
+# Now, we want to minimize RMSE for a new model, consider a cube root function
+mod <- function(a, b, data, x = "annual_o3_mean") {
+  return (a + b * (data[[x]])^2 )
+}
+
+best <- optim(c(0, 0), function(a) rmse(train_data$prevalence, mod(a[1], a[2], train_data) ) ) 
+best
+
+best_fun <- function(x) {
+  return (best$par[1] + best$par[2] * x^2)
+}
+  
+ggplot(data=test_data, aes(x = annual_o3_mean, y = prevalence)) + geom_point(
+    aes(color = state), 
+    alpha = 0.6 
+  ) + geom_function(fun = best_fun,
+                    col = "red") + geom_abline(intercept=lm0$coefficients[1], slope=lm0$coefficients[2], col="blue")
+
+
+# taking factors code from above and adding ordering!
+income_pollution$income_factor <- factor(income_pollution$income_factor, levels=c("<15k","15-25k", "25-50k", "50-75k"))
+```
+
+Okay,, we seem to be better than linear regression by a small amount. But perhaps we can do better with gradient descent: First, recall the function
+```{r}
+gradient_descent <- function(f, theta0, step_scale, stopping_deriv, max_iter, ...) {
+  theta <- theta0
+  for (i in 1:max_iter) {
+    gradient <- numDeriv::grad(f, theta, ...)
+    if(all(abs(gradient) < stopping_deriv)) {
+      break()
+    }
+    theta <- theta - step_scale * gradient
+  }
+  if (i == max_iter) {
+    warning("Maximal number of iterations reached, convergence not assured")
+  }
+  fit <- 
+    list(
+      argmin = theta,
+      final_gradient = gradient,
+      final_value = f(theta, ...),
+      iterations = i,
+      theta0 = theta0,
+      step_scale = step_scale,
+      stopping_deriv = stopping_deriv
+      )
+  return(fit)
+}
+```
+
+Now, we apply gradient desscent with an objective function of RSME:
+```{r}
+adjusted_rmse <- function(b, Y, X) {
+  return ( sqrt ( mean ( (Y - (b[1] * b[2]^X))^2)))
+}
+g <- gradient_descent(
+  f = adjusted_rmse,
+  theta0 = c(1,1),
+  step_scale = 0.001,
+  stopping_deriv=1e-4,
+  max_iter = 20000,
+  Y = train_data$prevalence,
+  X = train_data$annual_o3_mean
+)
+
+grad_fun <- function(x) {
+  return (g$argmin[1] * g$argmin[2]^x)
+}
+ggplot(data=test_data, aes(x = annual_o3_mean, y = prevalence)) + geom_point(
+    aes(color = state), 
+    alpha = 0.6 
+  ) + geom_function(fun = grad_fun,
+                    col = "red") + geom_abline(intercept=lm0$coefficients[1], slope=lm0$coefficients[2], col="blue")
+```
