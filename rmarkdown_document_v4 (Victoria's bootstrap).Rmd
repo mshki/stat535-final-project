@@ -1081,22 +1081,22 @@ subs_age %>%
   ggplot(aes(x = annual_co_mean, y = prevalence)) + geom_point(
     aes(color = age_group), 
     alpha = 0.85
-  )
+  ) + theme_minimal()
 subs_age %>%
   ggplot(aes(x = annual_o3_mean, y = prevalence)) + geom_point(
     aes(color = age_group), 
     alpha = 0.85
-  )
+  ) + theme_minimal()
 subs_age %>%
   ggplot(aes(x = annual_so2_mean, y = prevalence)) + geom_point(
     aes(color = age_group), 
     alpha = 0.85
-  )
+  ) + theme_minimal()
 subs_age %>%
   ggplot(aes(x = annual_no2_mean, y = prevalence)) + geom_point(
     aes(color = age_group), 
     alpha = 0.85
-  )
+  ) + theme_minimal()
 ```
 
 Now, we create model
