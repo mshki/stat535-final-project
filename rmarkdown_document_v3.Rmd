@@ -937,6 +937,7 @@ library(rsample)
 keep = c("New York", "New Jersey", "Colorado", "Wisconsin", "Michigan", "Arizona", "Indiana", "Missouri", "Illinois")
 subs <- combined_data[combined_data$state %in% keep, ]
 
+# Test, train split
 data_split <- initial_split(
   subs, 
   prop = 0.75
@@ -945,7 +946,7 @@ train_data <- training(data_split)
 test_data  <- testing(data_split)
 
 # Train linear regression model
-lm0 <- lm(prevalence ~ annual_o3_mean, data=train_data)
+lm0 <- lm(prevalence ~ annual_o3_mean, data=subs)
 
 rmse <- function(actual, pred) {
   diff <- actual - pred
@@ -953,81 +954,38 @@ rmse <- function(actual, pred) {
 }
 
 # Now test on data, calc RMSE to evaluate goodness of fit
-rmse(test_data$prevalence, predict(lm0, test_data))
-# lwk a really low value!
+rmse(subs$prevalence, predict(lm0, subs))
 
-# Now, we want to minimize RMSE for a new model, consider a cube root function
-mod <- function(a, b, data, x = "annual_o3_mean") {
-  return (a + b * (data[[x]])^2 )
+
+# Now, we want to minimize RMSE for a new model, consider the following
+
+
+mod <- function(a) {
+  return (a[1] * (subs$annual_o3_mean)^a[2] )
 }
 
-best <- optim(c(0, 0), function(a) rmse(train_data$prevalence, mod(a[1], a[2], train_data) ) ) 
+best <- optim(c(0,0), function(a) rmse(subs$prevalence, mod(a))) 
 best
 
 best_fun <- function(x) {
-  return (best$par[1] + best$par[2] * x^2)
+  return (best$par[1] * x^(best$par[2]) )
 }
   
-ggplot(data=test_data, aes(x = annual_o3_mean, y = prevalence)) + geom_point(
+ggplot(data=subs, aes(x = annual_o3_mean, y = prevalence)) + geom_point(
     aes(color = state), 
     alpha = 0.6 
   ) + geom_function(fun = best_fun,
-                    col = "red") + geom_abline(intercept=lm0$coefficients[1], slope=lm0$coefficients[2], col="blue")
+                    col = "red") + geom_abline(intercept=lm0$coefficients[1], slope=lm0$coefficients[2], col="blue") + theme_minimal()
 
 
 # taking factors code from above and adding ordering!
 income_pollution$income_factor <- factor(income_pollution$income_factor, levels=c("<15k","15-25k", "25-50k", "50-75k"))
 ```
+# Factoring Visualization
 
-Okay,, we seem to be better than linear regression by a small amount. But perhaps we can do better with gradient descent: First, recall the function
+Now, we can make a visualization using factors and contour plots to see which income groups are most suceptible:
 ```{r}
-gradient_descent <- function(f, theta0, step_scale, stopping_deriv, max_iter, ...) {
-  theta <- theta0
-  for (i in 1:max_iter) {
-    gradient <- numDeriv::grad(f, theta, ...)
-    if(all(abs(gradient) < stopping_deriv)) {
-      break()
-    }
-    theta <- theta - step_scale * gradient
-  }
-  if (i == max_iter) {
-    warning("Maximal number of iterations reached, convergence not assured")
-  }
-  fit <- 
-    list(
-      argmin = theta,
-      final_gradient = gradient,
-      final_value = f(theta, ...),
-      iterations = i,
-      theta0 = theta0,
-      step_scale = step_scale,
-      stopping_deriv = stopping_deriv
-      )
-  return(fit)
-}
+income_pollution$income_factor <- factor(income_pollution$income_factor, levels=c("<15k","15-25k", "25-50k", "50-75k"))
 ```
 
-Now, we apply gradient desscent with an objective function of RSME:
-```{r}
-adjusted_rmse <- function(b, Y, X) {
-  return ( sqrt ( mean ( (Y - (b[1] * b[2]^X))^2)))
-}
-g <- gradient_descent(
-  f = adjusted_rmse,
-  theta0 = c(1,1),
-  step_scale = 0.001,
-  stopping_deriv=1e-4,
-  max_iter = 20000,
-  Y = train_data$prevalence,
-  X = train_data$annual_o3_mean
-)
 
-grad_fun <- function(x) {
-  return (g$argmin[1] * g$argmin[2]^x)
-}
-ggplot(data=test_data, aes(x = annual_o3_mean, y = prevalence)) + geom_point(
-    aes(color = state), 
-    alpha = 0.6 
-  ) + geom_function(fun = grad_fun,
-                    col = "red") + geom_abline(intercept=lm0$coefficients[1], slope=lm0$coefficients[2], col="blue")
-```
