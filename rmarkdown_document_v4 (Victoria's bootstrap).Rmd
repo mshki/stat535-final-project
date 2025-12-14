@@ -977,14 +977,166 @@ ggplot(data=subs, aes(x = annual_o3_mean, y = prevalence)) + geom_point(
     alpha = 0.6 
   ) + geom_function(fun = best_fun,
                     col = "red") + geom_abline(intercept=lm0$coefficients[1], slope=lm0$coefficients[2], col="blue") + theme_minimal()
-
-
-# taking factors code from above and adding ordering!
-income_pollution$income_factor <- factor(income_pollution$income_factor, levels=c("<15k","15-25k", "25-50k", "50-75k"))
 ```
 
-# Bootstrapping
+# Age groups
 
+First, get new urls.
+
+```{r}
+get_age_url <- function(year) {
+  if (year >= 2000 & year <= 2009) {
+    # 2 digit folder + "current"
+    two_digit <- sprintf("%02d", year %% 100)
+    paste0("https://www.cdc.gov/asthma/brfss/", two_digit, "/current/tableC3.htm")
+
+  } else if (year == 2010) {
+    # 2010 only: has /current/
+    "https://www.cdc.gov/asthma/brfss/2010/current/tableC3.htm"
+
+  } else if (year >= 2011 & year <= 2020) {
+    # 2011+ uses only year, NO 'current' folder
+    paste0("https://www.cdc.gov/asthma/brfss/", year, "/tableC3.htm")
+
+  } else {
+    stop("Year outside supported range 2000–2020.")
+  }
+}
+```
+
+Now, function for scraping age group tables
+
+```{r}
+scrape_age_group <- function(year) {
+  
+  url <- get_age_url(year)
+  
+  page <- read_html(url)
+  
+  # Extract all HTML tables — usually the first is the income table
+  tables <- page %>% html_table(fill = TRUE)
+  
+  # if table is missing, return empty df
+  if (length(tables) == 0) return(data.frame())
+  
+  tbl <- tables[[1]] %>% clean_names()
+  
+  # Standardize column names (table structures vary slightly by year)
+  names(tbl)[1:5] <- c("state", "age_group", "sample_size", "prevalence", "se")
+  
+  # Clean table
+  tbl <- tbl %>%
+    filter(
+      !state %in% c("U.S. Total", "U.S. Total**", "", NA),
+      !str_detect(state, "Total")   # removes "State Total"
+    ) %>% 
+    mutate(
+      year = year,
+      prevalence = suppressWarnings(as.numeric(prevalence)),
+      se = suppressWarnings(as.numeric(se))
+    ) %>% 
+    select(
+      state,
+      age_group,
+      prevalence,
+      se,
+      year
+    ) %>%  
+    mutate(
+      age_group = str_trim(age_group)
+    ) %>% filter(!is.na(prevalence))
+
+  return(convert_state_code(tbl, col="state"))
+}
+```
+
+Now we get the data:
+```{r}
+age_data <- map_df(years, ~ tryCatch(scrape_age_group(.x), error = function(e) NULL))
+
+glimpse(age_data)
+```
+Now, we (1) make levels, and (2) combine age group data set with mean pollution data set. 
+
+```{r}
+age_data <- age_data %>%
+  mutate(
+    age_group = factor(
+      age_group,
+      levels = c("18-24", "25-34", "35-44", "45-54", "55-64", "65+"),
+      ordered = TRUE
+    )
+  )
+
+combined_pol_and_age <- mean_pol %>%
+  inner_join(age_data, by = c("state", "year"))
+```
+
+We can create scatterplots to demonstrate the relationship in most prevalent states:
+```{r}
+keep = c("New York", "New Jersey", "Colorado", "Wisconsin", "Michigan", "Arizona", "Indiana", "Missouri", "Illinois")
+subs_age <- combined_pol_and_age[combined_pol_and_age$state %in% keep, ]
+
+subs_age %>%
+  ggplot(aes(x = annual_co_mean, y = prevalence)) + geom_point(
+    aes(color = age_group), 
+    alpha = 0.85
+  )
+subs_age %>%
+  ggplot(aes(x = annual_o3_mean, y = prevalence)) + geom_point(
+    aes(color = age_group), 
+    alpha = 0.85
+  )
+subs_age %>%
+  ggplot(aes(x = annual_so2_mean, y = prevalence)) + geom_point(
+    aes(color = age_group), 
+    alpha = 0.85
+  )
+subs_age %>%
+  ggplot(aes(x = annual_no2_mean, y = prevalence)) + geom_point(
+    aes(color = age_group), 
+    alpha = 0.85
+  )
+```
+
+Now, we create model
+```{r}
+agelm <- plm(
+  prevalence ~ age_group + annual_o3_mean + annual_no2_mean + annual_so2_mean + annual_co_mean,
+  data  = combined_pol_and_age,
+  index = c("state", "year"),
+  model = "within"
+)
+
+summary(agelm)
+```
+
+Now, we can find:
+```{r}
+age_summary <- age_data %>%
+  filter(!is.na(age_group)) %>%   # remove NA income levels
+  group_by(age_group) %>%
+  summarise(
+    mean_prev = mean(prevalence, na.rm = TRUE),
+    se_prev   = sd(prevalence, na.rm = TRUE) / sqrt(n())
+  )
+
+ggplot(age_summary, aes(x = age_group, y = mean_prev, fill = age_group)) +
+  geom_col(width = 0.6, color = "black", alpha = 0.8) +
+  geom_errorbar(aes(ymin = mean_prev - se_prev, ymax = mean_prev + se_prev),
+                width = 0.15, size = 0.9) +
+  labs(
+    title = "Mean Asthma Prevalence by Age Group",
+    x = "Age Group",
+    y = "Mean Asthma Prevalence (%)"
+  ) +
+  scale_fill_brewer(palette = "Blues") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+```
+
+
+# Bootstrapping
 
 ```{r}
 
