@@ -280,7 +280,7 @@ plot_correlation_aqi_pollutant(mean_aqi, mean_pol,
 plot_correlation_aqi_pollutant(mean_aqi, mean_pol,
                                2010, "annual_so2_aqi", "annual_so2_mean")
 plot_correlation_aqi_pollutant(mean_aqi, mean_pol,
-                               2000, "annual_so2_aqi", "annual_so2_mean")
+                               2000, "annual_o3_aqi", "annual_o3_mean")
 plot_correlation_aqi_pollutant(mean_aqi, mean_pol,
                                2005, "annual_co_aqi", "annual_co_mean")
 ```
